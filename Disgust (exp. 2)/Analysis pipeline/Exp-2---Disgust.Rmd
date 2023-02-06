@@ -1,0 +1,628 @@
+---
+title: <font size="5">**Homeostatic relevance promotes access to visual awareness - Disgust**</font> 
+author: <br> <font size="4"> Piotr Litwin (piotr.litwin@psych.uw.edu.pl) </font> <br>
+date: <font size="3"> February 3th 2023  </font>
+output: html_document
+chunk_output_type: console
+---
+
+&nbsp;
+
+<font size="3">
+**List of sections**:
+
+1. Load required packages and data [S1](#S1)
+2. Localization task performance [S2](#S2)
+3. Discrimination task performance [S3](#S3)
+4. Task x Conditioning interaction + relevant plots [S4](#S4)
+5. SCR-related analyses + relevant plots [S5](#S5) </font>
+
+<a name="S1"></a>
+&nbsp;
+
+#####**1. Load required packages and data**
+
+```{r, message=FALSE}
+
+# load required packages and data
+library(car, quietly=TRUE)
+library(colorspace, quietly=TRUE)
+library(DescTools, quietly=TRUE)
+library(dplyr, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(gridExtra, quietly=TRUE)
+library(magrittr, quietly=TRUE)
+library(readxl, quietly=TRUE)
+library(rstan, quietly=TRUE)
+library(stringr, quietly=TRUE)
+
+# Working directory - remember to set your own wd path
+setwd("C:/Users/pioli/Desktop/Preludium/data/Disgust") 
+
+# Load data - trials
+dfs = list.files(pattern = "*results.csv")
+ldf = lapply(dfs, read.csv)
+
+db = as.data.frame(ldf[1])
+for (i in 2:length(ldf)) {
+  dat = as.data.frame(ldf[i])
+  cols = intersect(colnames(dat), colnames(db))
+  db = rbind(db[, cols], dat[, cols])
+  
+}
+
+# Load data - parameters (threshold, CS+ color etc.)
+dfspar = list.files(pattern = "*parameters.csv")
+ldfpar = lapply(dfspar, read.csv)
+
+dbpar = as.data.frame(ldfpar[1])
+for (i in 2:length(ldfpar)) {
+  dat = as.data.frame(ldfpar[i])
+  cols = intersect(colnames(dat), colnames(dbpar))
+  dbpar = rbind(dbpar[, cols], dat[, cols])
+  
+}
+
+# Merge data frames by id
+dfall = merge(db, dbpar, by = "ID")
+
+# Create a variable 'color' related to the presented annulus' color
+dfall = dfall %>% mutate(color = case_when(CSPcolor == 'blue' & conditioning == 'CS+' ~ 'blue',
+                                           CSPcolor == 'blue' & conditioning == 'CS-' ~ 'red',
+                                           CSPcolor == 'red' & conditioning == 'CS+' ~ 'red',
+                                           CSPcolor == 'red' & conditioning == 'CS-' ~ 'blue'))
+
+# Descriptive statistics 
+dbpar = dbpar %>% mutate(ThreshDom = case_when(Eyedominance == 'right' ~ ThresholdR,
+                                               Eyedominance == 'left' ~ ThresholdL)) %>% 
+                  mutate(ThreshRec = case_when(Eyedominance == 'right' ~ ThresholdL,
+                                               Eyedominance == 'left' ~ ThresholdR))
+
+dbpar %$% cat(round(mean(ThreshDom, na.rm = TRUE)/60, 2), "s") # mean threshold for dominant eyes
+dbpar %$% round(sd(ThreshDom, na.rm = TRUE)/60, 2)
+
+dbpar %$% cat(round(mean(ThreshRec, na.rm = TRUE)/60, 2), "s") # mean threshold for recessive eyes
+dbpar %$% round(sd(ThreshRec, na.rm = TRUE)/60, 2)
+
+# Mean aversion
+dbpar %$% mean(Aversion, na.rm = TRUE)
+dbpar %$% sd(Aversion, na.rm = TRUE)
+
+```
+
+<a name="S2"></a>
+&nbsp;
+
+#####**2. Localization task performance**
+
+```{r}
+
+# Data frame for statistical testing - mean localization performances per each CS+/CS- condition
+locacc = dfall %>% subset(correctloc == 1) %>% count(ID, conditioning) %>%
+  mutate(Accuracy = n/64*100, .keep = "unused") %>% mutate(Task = 'localization') %>%
+  mutate(conditioning = factor(conditioning, levels = c("CS+","CS-")))
+
+locacc = merge(locacc, dbpar[, c(1,2)], by = "ID")
+
+locacc = locacc %>% mutate(color = case_when(CSPcolor == 'blue' & conditioning == 'CS+' ~ 'blue',
+                                             CSPcolor == 'blue' & conditioning == 'CS-' ~ 'red',
+                                             CSPcolor == 'red' & conditioning == 'CS+' ~ 'red',
+                                             CSPcolor == 'red' & conditioning == 'CS-' ~ 'blue'))
+
+#### AUTOMATED OUTLIER (CHANCE LEVEL) DETECTION
+
+## This is how we identify the participants who are more likely to
+## perform at chance level
+
+model_code = '
+data{
+  int<lower=0> N;
+  int<lower=0> correct[N]; // number of correct trials
+  int<lower=1> total[N];   // total number of trials
+  real logit_chance;
+  real logit_max;
+}
+parameters{
+  real<lower=logit_chance,upper=logit_max> mu;
+  real mus[N];
+  real<lower=0> sigma;
+  simplex[2] theta;
+}
+transformed parameters{
+  // log of p(not_from_chance_distribution|data) / p(from_chance_distribution|data). If this is > 0 = log(1) then 
+  // this may be a chance performer
+  real log_not_chance[N];
+  vector[2] log_theta;
+  vector[2] lps;
+  real lse[N];
+  log_theta = log(theta);
+  for(i in 1:N){
+    lps = log_theta;
+    // percent correct scores come from a mixture of two distributions one of which has p(correct) = chance
+    lps[1] += binomial_logit_lpmf(correct[i] | total[i], mus[i]);
+    lps[2] += binomial_logit_lpmf(correct[i] | total[i], logit_chance);
+    // random effects
+    lse[i] = log_sum_exp(lps) + normal_lpdf(mus[i] | mu, sigma);
+    // we have to introduce the prior on mu here
+    log_not_chance[i] = lps[1] - (lse[i] + uniform_lpdf(mu | logit_chance, logit_max));
+  }
+}
+model{
+  for(i in 1:N)
+    target += lse[i];
+  target += uniform_lpdf(mu | logit_chance, logit_max);
+}
+'
+# Outlier detection - localization
+
+resloc = aggregate(correctloc ~ ID, subset(db, is.nan(correctloc) == FALSE), function(x)c(sum(x), length(x)))
+
+mg1 = stan(model_code = model_code, data = list(correct = resloc$correctloc[,1], total = resloc$correctloc[,2], 
+                                                N = nrow(resloc),
+                                                ## In this case chance level = .5
+                                                logit_chance = binomial()$linkfun(.5),
+                                                ## Here we can safely assume that the population average performance cannot exceed .95
+                                                ## Thus we define ceiling level performance as > 95%
+                                                logit_max = binomial()$linkfun(.95)),
+                                                pars = c('mu', 'theta', 'log_not_chance', 'mus'))
+
+# Two chance performers detected in the localization task ("B25" & "B50")
+mg1 = as.data.frame(mg1)
+resloc$lng = apply(mg1[grep('log_not', names(mg1))], 2, mean)
+dp1 = with(resloc, data.frame(pc = correctloc[,1]/ correctloc[,2], lng = lng, id = ID))
+thr = mean(c(max(dp1$pc[dp1$lng < 0]), min(dp1$pc[dp1$lng >= 0])))
+
+ggplot(dp1, aes(lng, pc, label = id)) +
+  geom_vline(xintercept = 0, lty = 'dotted') + 
+  geom_abline(intercept = thr, slope = 0, lty = 'dotted') +
+  geom_point(aes(color = lng >= 0)) +
+  geom_text(data = subset(dp1, lng < 0), nudge_y = -0.01, check_overlap = TRUE) +
+  labs(x = 'ln(p(Not a chance performer))', color = NULL, y = 'Percent Correct', title = sprintf('Threshold = %.2f', thr))
+
+# Identify participants with > 95% general performance
+
+locperf = data.frame(ID = locacc$ID[locacc$conditioning == 'CS+'], 
+                     meanlocacc = (locacc$Accuracy[locacc$conditioning == "CS+"] + 
+                                   locacc$Accuracy[locacc$conditioning == "CS-"])/2)
+
+# Two additional participants to be removed from the localization-related analyses due to overperforming ("B8" & "B18")
+unique(locperf$ID[locperf$meanlocacc >= 95])
+
+# 4 participants to be removed altogether ("B8", "B18", "B25", "B50")
+outliersloc = c(unique(dp1$id[dp1$lng < 0]), unique(locperf$ID[locperf$meanlocacc >= 95]))
+outliersloc
+
+# paired t-test (see separate html document for Bayesian analyses ran in JASP)
+
+locacc %>% subset(!ID%in% outliersloc) %>% aggregate(Accuracy ~ conditioning, mean)
+locacc %>% subset(!ID%in% outliersloc) %>% aggregate(Accuracy ~ conditioning, sd)
+
+locacc %>% subset(!ID%in% outliersloc) %$% 
+  t.test(Accuracy ~ conditioning, paired = TRUE, alternative = "less")
+
+# two-sided exploratory analysis
+locacc %>% subset(!ID%in% outliersloc) %$% 
+  t.test(Accuracy ~ conditioning, paired = TRUE, alternative = "two.sided")
+
+# No systematic preferences for either of the colors in the localization task
+locacc %>% subset(!ID%in%outliersloc) %>% aggregate(Accuracy ~ color, mean)
+locacc %>% subset(!ID%in%outliersloc) %>% aggregate(Accuracy ~ color, sd)
+locacc %>% subset(!ID%in%outliersloc) %$% t.test(Accuracy ~ color, paired = TRUE)
+
+# Save data frame for Bayesian analyses in JASP
+locaccoutput = data.frame(ID = locacc$ID[locacc$conditioning == "CS+"], 
+                          CSPaccu = locacc$Accuracy[locacc$conditioning == "CS+"], 
+                          CSMaccu = locacc$Accuracy[locacc$conditioning == "CS-"])
+locaccoutput = merge(locaccoutput, dbpar[, c(1,2)], by = "ID")
+
+write.csv(subset(locaccoutput, !ID%in%outliersloc), "C:\\Users\\pioli\\Desktop\\Preludium\\Data\\Disgustloc.csv", 
+          row.names=FALSE)
+
+```
+
+<a name="S3"></a>
+&nbsp;
+
+#####**3. Discrimination task performance**
+
+```{r}
+# Data frame for statistical testing - mean discrimination/identification performances per each CS+/CS- condition
+idacc = dfall %>% subset(correctid == 1) %>% count(ID, conditioning) %>%
+  mutate(Accuracy = n/64*100, .keep = "unused") %>% mutate(Task = 'discrimination') %>%
+  mutate(conditioning = factor(conditioning, levels = c("CS+","CS-")))
+
+idacc = merge(idacc, dbpar[, c(1,2)], by = "ID")
+
+idacc = idacc %>% mutate(color = case_when(CSPcolor == 'blue' & conditioning == 'CS+' ~ 'blue',
+                                           CSPcolor == 'blue' & conditioning == 'CS-' ~ 'red',
+                                           CSPcolor == 'red' & conditioning == 'CS+' ~ 'red',
+                                           CSPcolor == 'red' & conditioning == 'CS-' ~ 'blue'))
+
+# Automated outlier detection - discrimination task
+
+resid = aggregate(correctid ~ ID, subset(db, is.nan(correctid) == FALSE), function(x)c(sum(x), length(x)))
+
+mg2 = stan(model_code = model_code, data = list(correct = resid$correctid[,1], total = resid$correctid[,2], 
+                                                N = nrow(resid),
+                                                ## In this case chance level = .5
+                                                logit_chance = binomial()$linkfun(.5),
+                                                ## Here we can safely assume that the population average performance cannot exceed .95
+                                                ## Thus we define ceiling level performance as > 95%
+                                                logit_max = binomial()$linkfun(.95)),
+                                                pars = c('mu', 'theta', 'log_not_chance', 'mus'))
+
+
+# Four chance performers detected in the discrimination task
+mg2 = as.data.frame(mg2)
+resid$lng = apply(mg2[grep('log_not', names(mg2))], 2, mean)
+dp2 = with(resid, data.frame(pc = correctid[,1]/ correctid[,2], lng = lng, id = ID))
+thr = mean(c(max(dp2$pc[dp2$lng < 0]), min(dp2$pc[dp2$lng >= 0])))
+
+ggplot(dp2, aes(lng, pc, label = id)) +
+  geom_vline(xintercept = 0, lty = 'dotted') + 
+  geom_abline(intercept = thr, slope = 0, lty = 'dotted') +
+  geom_point(aes(color = lng >= 0)) +
+  geom_text(data = subset(dp2, lng < 0), nudge_y = -0.01, check_overlap = TRUE) +
+  labs(x = 'ln(p(Not a chance performer))', color = NULL, y = 'Percent Correct', title = sprintf('Threshold = %.2f', thr))
+
+# Identify participants with > 95% general performance
+idperf = data.frame(ID = idacc$ID[idacc$conditioning == 'CS+'], 
+                     meanidacc = (idacc$Accuracy[idacc$conditioning == "CS+"] + 
+                                   idacc$Accuracy[idacc$conditioning == "CS-"])/2)
+
+# No overperformers in the discrimination task
+unique(idperf$ID[idperf$meanidacc >= 95])
+
+outliersid = c(unique(dp2$id[dp2$lng < 0]), unique(idperf$ID[idperf$meanidacc >= 95]))
+
+# Four participants to be removed altogether ("B2", "B16", "B25", "B28")
+outliersid
+
+# paired t-test (see separate html document for Bayesian analyses ran in JASP)
+
+idacc %>% subset(!ID%in% outliersid) %>% aggregate(Accuracy ~ conditioning, mean)
+idacc %>% subset(!ID%in% outliersid) %>% aggregate(Accuracy ~ conditioning, sd)
+
+idacc %>% subset(!ID%in% outliersid) %$% 
+  t.test(Accuracy ~ conditioning, paired = TRUE, alternative = "less")
+
+# two-sided exploratory analysis
+
+idacc %>% subset(!ID%in% outliersid) %$% 
+  t.test(Accuracy ~ conditioning, paired = TRUE, alternative = "two.sided")
+
+# No systematic preferences for either of the colors in the discrimination task
+
+idacc %>% subset(!ID%in%outliersid) %>% aggregate(Accuracy ~ color, mean)
+idacc %>% subset(!ID%in%outliersid) %>% aggregate(Accuracy ~ color, sd)
+idacc %>% subset(!ID%in%outliersid) %$% t.test(Accuracy ~ color, paired = TRUE)
+
+# Save data frame for Bayesian analyses in JASP
+idaccoutput = data.frame(ID = idacc$ID[idacc$conditioning == "CS+"], 
+                          CSPaccu = idacc$Accuracy[idacc$conditioning == "CS+"], 
+                          CSMaccu = idacc$Accuracy[idacc$conditioning == "CS-"])
+idaccoutput = merge(idaccoutput, dbpar[, c(1,2)], by = "ID")
+
+write.csv(subset(idaccoutput, !ID%in%outliersid), "C:\\Users\\pioli\\Desktop\\Preludium\\Data\\Disgustid.csv", 
+          row.names=FALSE)
+
+```
+<a name="S4"></a>
+&nbsp;
+
+#####**4. Task x Conditioning interaction + relevant plots**
+
+```{r}
+
+# Check for multivariate outliers  
+perf = merge(locperf, idperf, by = "ID")
+perfmodel = lm(meanidacc ~ meanlocacc, data = perf)
+outlierTest(perfmodel) # one large outlier detected
+perf[21,] 
+
+# "B27" is a large outlier, probably misunderstood id task (already detected before)
+# Visual inspection also reveals another outlier who probably misunderstood id task ("B16", also detected before)
+
+ggplot(perf,aes(meanlocacc, meanidacc, label = ID)) + geom_point() + geom_smooth(method = lm) +
+  geom_text(nudge_y = -1.5, check_overlap = TRUE) 
+
+# Also "B25" is similarly chance performing in both tasks. 
+# Let's run the analysis with participants "B16", "B25", and "B28" excluded
+
+outliers = c("B16", "B28", intersect(outliersloc, outliersid))
+
+# Task x Conditioning ANOVA
+taskacc = rbind(locacc, idacc)
+
+taskanova = taskacc %>% subset(!ID%in% outliers) %$% aov(Accuracy ~ Task * conditioning + 
+                                                           Error(ID/(Task * conditioning)))
+summary(taskanova)
+
+# Effect sizes for ANOVA
+EtaSq(taskanova, type = 1, anova = TRUE)
+
+# PLOT - MAIN RESULTS
+
+# Define functions used in plotting
+
+"%||%" <- function(a, b) {
+  if (!is.null(a)) a else b
+}
+
+geom_flat_violin <- function(mapping = NULL, data = NULL, stat = "ydensity",
+                             position = "dodge", trim = TRUE, scale = "area",
+                             show.legend = NA, inherit.aes = TRUE, ...) {
+  layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomFlatViolin,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      trim = trim,
+      scale = scale,
+      ...
+    )
+  )
+}
+
+GeomFlatViolin <-
+  ggproto("Violinist", Geom,
+          setup_data = function(data, params) {
+            data$width <- data$width %||%
+              params$width %||% (resolution(data$x, FALSE) * 0.6) # 0.7
+            
+            # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+            data %>%
+              group_by(group) %>%
+              mutate(ymin = min(y),
+                     ymax = max(y),
+                     xmin = x,
+                     xmax = x + width / 2)
+            
+          },
+          
+          draw_group = function(data, panel_scales, coord) {
+            # Find the points for the line to go all the way around
+            data <- transform(data, xminv = x,
+                              xmaxv = x + violinwidth * (xmax - x))
+            
+            # Make sure it's sorted properly to draw the outline
+            newdata <- rbind(plyr::arrange(transform(data, x = xminv), y),
+                             plyr::arrange(transform(data, x = xmaxv), -y))
+            
+            # Close the polygon: set first and last point the same
+            # Needed for coord_polar and such
+            newdata <- rbind(newdata, newdata[1,])
+            
+            ggplot2:::ggname("geom_flat_violin", GeomPolygon$draw_panel(newdata, panel_scales, coord))
+          },
+          
+          draw_key = draw_key_polygon,
+          
+          default_aes = aes(weight = 1, colour = "grey20", fill = "white", size = 0.4, #thickness of line
+                            alpha = NA, linetype = "solid"), # solid
+          
+          required_aes = c("x", "y"))
+
+# MAIN PLOT - task-specific outliers excluded
+
+# Prepare data for plot drawing
+
+plotframe = rbind(subset(locacc, !ID%in%outliersloc), subset(idacc, !ID%in%outliersid))
+plotfactor = factor(plotframe$Task, levels = c("localization", "discrimination"))
+
+summary_loc = plotframe %>% subset(Task == 'localization') %>%
+  group_by(conditioning) %>% 
+  dplyr::summarise(mean = mean(Accuracy, na.rm = TRUE),
+                   min = mean(Accuracy) - qnorm(0.975)*sd(Accuracy)/sqrt(n()),
+                   max = mean(Accuracy) + qnorm(0.975)*sd(Accuracy)/sqrt(n()),
+                   sd = sd(Accuracy)) %>%
+  mutate(task = 'localization')
+
+summary_id = plotframe %>% subset(Task == 'discrimination') %>%
+  group_by(conditioning) %>% 
+  dplyr::summarise(mean = mean(Accuracy, na.rm = TRUE),
+                   min = mean(Accuracy) - qnorm(0.975)*sd(Accuracy)/sqrt(n()),
+                   max = mean(Accuracy) + qnorm(0.975)*sd(Accuracy)/sqrt(n()),
+                   sd = sd(Accuracy)) %>%
+  mutate(task = 'discrimination')
+
+summary_data = rbind(summary_loc, summary_id )
+
+# Main plot
+
+plotframe %>% ggplot(aes(x = plotfactor, y = Accuracy, fill = conditioning)) +
+  geom_flat_violin(position = position_nudge(x = .15, y = 0), trim=TRUE, alpha = 0.6) +
+  geom_point((aes(colour = factor(conditioning), group = conditioning)), 
+             position = position_jitterdodge(jitter.width = 0.05, dodge.width = 0.22), 
+             size = 2.2, alpha = .5, show.legend = FALSE) +
+  geom_boxplot(width = .12, outlier.shape = NA, alpha = 0.6, size = 0.8, 
+               position = position_dodge(width = 0.22), size = 0.3) +
+  scale_y_continuous(limits = c(50, 100), breaks = c(50, 60, 70, 80, 90, 100), expand = c(0.05, 0.05)) +
+  geom_pointrange(data = summary_data,
+                  aes(task, mean, ymin = min, ymax = max),
+                  shape = 16, size = 1.3, alpha = 0.6,
+                  position = position_dodge(width = 0.22),
+                  show.legend = FALSE) +
+  scale_fill_manual(values=c(darken("palevioletred2", amount = 0.1), darken("plum3", amount = 0.17))) + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), axis.line = element_line(colour = "black"), 
+        axis.text = element_text(size = 11, colour = "black"), 
+        axis.title = element_text(size = 11, colour = "black")) + 
+  scale_color_manual(values=c(darken("palevioletred2", amount = 0.1), darken("plum3", amount = 0.17))) 
+
+```
+
+<a name="S5"></a>
+&nbsp;
+
+#####**5. SCR-related analyses + relevant plots**
+
+```{r}
+
+# Data frames for performance differences between CS+ and CS- (conditioning effects)
+# in localization and discrimination tasks
+
+cslocacc = data.frame(ID = locacc$ID[locacc$conditioning == 'CS+'], 
+                      CSPacculoc = locacc$Accuracy[locacc$conditioning == 'CS+'], 
+                      CSMacculoc = locacc$Accuracy[locacc$conditioning=='CS-'])
+
+cslocacc$differloc = cslocacc$CSPacculoc - cslocacc$CSMacculoc
+
+csidacc = data.frame(ID = idacc$ID[idacc$conditioning == 'CS+'], 
+                     CSPaccuid = idacc$Accuracy[idacc$conditioning == 'CS+'], 
+                     CSMaccuid = idacc$Accuracy[idacc$conditioning=='CS-'])
+
+csidacc$differid = csidacc$CSPaccuid - csidacc$CSMaccuid
+
+coneff = merge(cslocacc, csidacc, by = "ID")
+
+# Working directory - remember to set your own wd path
+setwd("C:/Users/pioli/Desktop/Preludium/data/Disgust/SCR")
+
+# Load data - SCRs
+dfsscr = list.files(pattern = ".xlsx")
+ldf = lapply(dfsscr, read_excel)
+
+db = as.data.frame(ldf[1])
+db$ID = "B1"
+
+for (i in 2:length(ldf)) {
+  dat = as.data.frame(ldf[i])
+  dat$ID = str_extract(dfsscr[i], "[^.]+")
+  cols = intersect(colnames(dat), colnames(db))
+  db = rbind(db[, cols], dat[, cols])
+}
+
+# Calculate normalized SCR scores
+colnames(db)[1] = 'SCR_raw'
+colnames(db)[2] = 'DeltaT'
+db$SCR_normalized = log(db$SCR_raw + 1)
+db$SCR_standardized = 0
+
+# Calculate standardized SCR scores
+for (i in unique(db$ID)) {
+  meanscr = mean(db$SCR_normalized[db$ID == i], na.rm = TRUE)
+  sdscr = sd(db$SCR_normalized[db$ID == i], na.rm = TRUE)
+  db$SCR_standardized[db$ID == i] = (db$SCR_normalized[db$ID == i] - meanscr)/sdscr 
+}
+
+db = subset(db, is.na(SCR_raw) == FALSE)
+
+# Calculate mean standardized response to event-related SCR per participant
+
+dbscr = db %>% subset(ER.SCR == 1) %>% 
+  group_by(ID) %>%  
+  dplyr::summarise(SCR_raw = mean(SCR_raw, na.rm = TRUE),
+                   SCR_standardized = mean(SCR_standardized, na.rm = TRUE))
+
+dbscr = as.data.frame(dbscr)
+
+# manipulation check - mean standardized US
+dbscr %$% mean(SCR_standardized, na.rm = TRUE)
+dbscr %$% sd(SCR_standardized, na.rm = TRUE)
+
+dbscr = merge(dbscr, coneff, by = "ID")
+dbscr = dbscr %>% mutate(differlocrec = case_when(differloc <= 0 ~ 0,
+                                                  differloc > 0 ~ differloc)) %>%
+                  mutate(differidrec = case_when(differid <= 0 ~ 0,
+                                                 differid > 0 ~ differid))
+
+# Check for non-responders according to the criteria specified in the
+# pre-registration document (https://osf.io/dyw64/)
+
+# 1. less than 5 NS-SCR events
+
+nsscr = as.data.frame(db %>% subset(ER.SCR == 0  & is.na(SCR_raw) == FALSE) %>%
+                        group_by(ID) %>% 
+                        summarise(N=n(),
+                                  .groups="drop"
+                        ))
+
+# 0 outliers according to this criterion
+unique(nsscr$ID[nsscr$N<5])
+
+# 2. mean event-related SCR (raw) < 0.02 uS
+
+# 0 outliers according to this criterion
+unique(dbscr$ID[dbscr$SCR_raw < 0.02])
+
+# 3. mean event-related SCR (standardized) < 0
+
+# 3 outliers according to this criterion 
+unique(dbscr$ID[dbscr$SCR_standardized < 0])
+
+scroutliers = unique(dbscr$ID[dbscr$SCR_standardized < 0])
+
+dbscr %>% subset(!ID%in% scroutliers) %$% shapiro.test(SCR_standardized)
+dbscr %>% subset(!ID%in% scroutliers) %$% shapiro.test(differlocrec)
+dbscr %>% subset(!ID%in% scroutliers) %$% shapiro.test(differidrec)
+
+# All variables violate the normality assumption
+# Kendall method will be used due to its correction for tied ranks
+
+# Correlation between SCR and conditioning effect - localization
+
+dbscr %>% subset(!ID%in% scroutliers & !ID%in% outliersloc) %$% 
+  cor.test(differlocrec, SCR_standardized, method = "kendall", alternative = "two.sided")
+
+# Correlation between SCR and conditioning effect - discrimination
+
+dbscr %>% subset(!ID%in% scroutliers & !ID%in% outliersid) %$% 
+  cor.test(differidrec, SCR_standardized, method = "kendall", alternative = "two.sided")
+
+# SCR PLOTS
+
+# Create plot data frames
+
+dbscrplot = dbscr[, c(1,3,10,11)] %>% subset(!ID%in% scroutliers)
+dbscrplot = dbscrplot %>% mutate(coneffloc = case_when(differlocrec <= 0 ~ 0,
+                                                       differlocrec > 0 ~ 1)) %>%
+                          mutate(coneffid = case_when(differidrec <= 0 ~ 0,
+                                                      differidrec > 0 ~ 1))
+
+dbscrplot$coneffloc = as.factor(dbscrplot$coneffloc)
+dbscrplot$coneffid = as.factor(dbscrplot$coneffid)
+
+scrmeansloc <- dbscrplot %>% 
+  group_by(coneffloc) %>% 
+  summarise(SCR_standardized = mean(SCR_standardized),
+            differlocrec = mean(differlocrec))
+
+scrmeansid <- dbscrplot %>% 
+  group_by(coneffid) %>% 
+  summarise(SCR_standardized = mean(SCR_standardized),
+            differidrec = mean(differidrec))
+
+plot1 = dbscrplot %>% subset(!ID%in% outliersloc) %>% ggplot(aes(differlocrec, SCR_standardized, color = coneffloc)) +
+  geom_point(data = dbscrplot %>% subset(!ID%in% outliersloc) %>% filter(differlocrec > 0), alpha = 0.7, show.legend = F) + 
+  geom_point(data = scrmeansloc[1, ], size = 6, alpha = 0.7, show.legend = F) +
+  geom_smooth(data = dbscrplot %>% subset(!ID%in% outliersloc), aes(fill = coneffloc), alpha = 0.2, method = "glm", fullrange = T, show.legend = F) + theme_classic() +
+  scale_color_manual(values=c(darken("palevioletred2", amount = 0.1), darken("palevioletred2", amount = 0.1))) +
+  scale_fill_manual(values=c(darken("palevioletred2", amount = 0.1), darken("firebrick2", amount = 0.05))) +
+  scale_y_continuous(limits= c(0, 2.5), breaks = c(0, 0.5, 1, 1.5, 2, 2.5)) +
+  labs(x = "Difference in % accuracy in favor of CS+" , y = "Mean standardized SCR to US") + 
+  theme(legend.text = element_text(size = 11), axis.text=element_text(size = 12), axis.title=element_text(size = 11)) + 
+  theme(legend.title = element_text(size = 11), legend.text=element_text(size = 11), axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)), axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0))) +
+  theme(aspect.ratio = 0.8)
+
+plot2 = dbscrplot %>% subset(!ID%in% outliersid) %>% ggplot(aes(differidrec, SCR_standardized, color = coneffid)) +
+  geom_point(data = dbscrplot %>% subset(!ID%in% outliersid) %>% filter(differidrec > 0), alpha = 0.7, show.legend = F) + 
+  geom_point(data = scrmeansid[1, ], size = 6, alpha = 0.7, show.legend = F) +
+  geom_smooth(data = dbscrplot %>% subset(!ID%in% outliersid), aes(fill = coneffid), alpha = 0.2, method = "glm", fullrange = T, show.legend = F) + theme_classic() +
+  scale_color_manual(values=c(darken("palevioletred2", amount = 0.1), darken("palevioletred2", amount = 0.1))) +
+  scale_fill_manual(values=c(darken("palevioletred2", amount = 0.1), darken("firebrick2", amount = 0.05))) +
+  scale_y_continuous(limits= c(0, 2.5), breaks = c(0, 0.5, 1, 1.5, 2, 2.5)) +
+  labs(x = "Difference in % accuracy in favor of CS+" , y = "Mean standardized SCR to US") + 
+  theme(legend.text = element_text(size = 11), axis.text=element_text(size = 12), axis.title=element_text(size = 11)) + 
+  theme(legend.title = element_text(size = 11), legend.text=element_text(size = 11), axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)), axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0))) +
+  theme(aspect.ratio = 0.8)
+
+grid.arrange(plot1, plot2, ncol = 2)
+
+
+```
+

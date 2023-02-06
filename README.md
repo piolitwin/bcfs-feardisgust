@@ -1,2 +1,16 @@
 # bcfs-feardisgust
 Data and analysis pipeline for the "Perceptual access to homeostatically relevant visual stimuli" project (https://osf.io/dyw64/)
+
+Title:  Homeostatic relevance promotes access to visual awareness
+
+Piotr Litwin 1, 2, *, Paweł Motyka 3, Surya Gayet 4 
+
+1. Faculty of Psychology, University of Warsaw, Stawki 5/7, 00-183, Warsaw, Poland
+2. Consciousness Lab, Institute of Psychology, Jagiellonian University, Ingardena 6, 30-060, Kraków, Poland
+3. Institute of Psychology, Polish Academy of Sciences, Jaracza 1, 00-378, Warsaw, Poland
+4. Department of Experimental Psychology & Helmholtz Institute, Utrecht University, Heidelberglaan 1, 3584 CS, Utrecht, The Netherlands
+
+Abstract  
+Fear and disgust have been associated with opposite influences on visual processing (facilitation versus inhibition), even though they both constitute negative homeostatic emotions that motivate avoidance behavior and entail increased arousal. In the current study, we hypothesized that [1] homeostatic relevance of stimuli modulate perception at very early stages of visual processing, [2] through widespread physiological responses, and that [3] the direction of these modulations depend on whether an emotion calls for immediate regulatory behavior (fear) or not (disgust). Specifically, we expected that arousal-mediated influences should facilitate detection of fear-related stimuli, and inhibit detection of disgust-related stimuli. These hypotheses were tested in two pre-registered experiments (total N = 120). Using a novel, response bias-free version of the breaking continuous flash suppression paradigm to measure access to visual awareness, we examined the localization and discrimination of fear-conditioned (Experiment 1) and disgust-conditioned stimuli (Experiment 2) at individually determined perceptual thresholds. Initially neutral stimuli were conditioned with 95 dB noise bursts (Experiment 1) and disgusting video clips (Experiment 2). Skin conductance response to aversive stimuli was measured during the conditioning acquisition as an indicator of evoked arousal. The first experiment confirmed our hypotheses that fear-conditioned stimuli are detected and discriminated better than neutral stimuli. Mean physiological response to unconditioned stimuli was positively correlated with the magnitude of conditioning-related perceptual preference, indicating that effects were related to arousal induced during emotional associative learning. The second experiment yielded results contrasting with our initial hypotheses. Instead of the expected perceptual suppression, the data showed enhanced perception of disgust-conditioned stimuli, also correlating with arousal levels, although the effects were generally weaker compared to those evoked by fear conditioning. The current study strengthens previous evidence for facilitated perception of threatening objects, evidencing the modulatory role of arousal, and shows for the first time that stimuli evoking disgust also gain preferential access to awareness. The results imply that stimuli associated with homeostatically relevant negative emotions are prioritized by the human visual system and that this preference is grounded in the underlying arousal levels. 
+
+Keywords: visual perception, fear, disgust, physiological arousal, homeostatic emotion, breaking continuous flash suppression

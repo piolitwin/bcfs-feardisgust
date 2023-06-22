@@ -1,7 +1,7 @@
 ---
-title: <font size="5">**Homeostatic relevance promotes access to visual awareness - Fear**</font> 
+title: <font size="5">**Perceptual access to homeostatically relevant visual stimuli" (https://osf.io/dyw64/) - Fear**</font> 
 author: <br> <font size="4"> Piotr Litwin (piotr.litwin@psych.uw.edu.pl) </font> <br>
-date: <font size="3"> February 3th 2023  </font>
+date: <font size="3"> June 20th 2023  </font>
 output: html_document
 chunk_output_type: console
 ---
@@ -15,7 +15,8 @@ chunk_output_type: console
 2. Localization task performance [S2](#S2)
 3. Discrimination task performance [S3](#S3)
 4. Task x Conditioning interaction + relevant plots [S4](#S4)
-5. SCR-related analyses + relevant plots [S5](#S5) </font>
+5. SCR-related analyses + relevant plots [S5](#S5)
+6. Supplementary SDT analyses [S6](#S6) </font>
 
 <a name="S1"></a>
 &nbsp;
@@ -37,7 +38,7 @@ library(rstan, quietly=TRUE)
 library(stringr, quietly=TRUE)
 
 # Working directory - remember to set your own wd path
-setwd("C:/Users/pioli/Desktop/Preludium/data/Fear") 
+setwd("C:/Users/pioli/OneDrive/Pulpit/PRELUDIUM/Preludium 2/data/Fear")
 
 # Load data - trials
 dfs = list.files(pattern = "*results.csv")
@@ -209,8 +210,8 @@ locaccoutput = data.frame(ID = locacc$ID[locacc$conditioning == "CS+"],
                           CSMaccu = locacc$Accuracy[locacc$conditioning == "CS-"])
 locaccoutput = merge(locaccoutput, dbpar[, c(1,2)], by = "ID")
 
-write.csv(subset(locaccoutput, !ID%in%outliersloc), "C:\\Users\\pioli\\Desktop\\Preludium\\Data\\Fearloc.csv", 
-          row.names=FALSE)
+write.csv(subset(locaccoutput, !ID%in%outliersloc), "C:\\Users\\pioli\\OneDrive\\Pulpit\\PRELUDIUM\\Preludium 2\\Data\\Fearloc.csv",  row.names=FALSE)
+
 
 ```
 
@@ -289,9 +290,7 @@ idaccoutput = data.frame(ID = idacc$ID[idacc$conditioning == "CS+"],
                           CSMaccu = idacc$Accuracy[idacc$conditioning == "CS-"])
 idaccoutput = merge(idaccoutput, dbpar[, c(1,2)], by = "ID")
 
-write.csv(subset(idaccoutput, !ID%in%outliersid), "C:\\Users\\pioli\\Desktop\\Preludium\\Data\\Fearid.csv", 
-          row.names=FALSE)
-
+write.csv(subset(locaccoutput, !ID%in%outliersloc), "C:\\Users\\pioli\\OneDrive\\Pulpit\\PRELUDIUM\\Preludium 2\\Data\\Fearid.csv",  row.names=FALSE)
 ```
 <a name="S4"></a>
 &nbsp;
@@ -467,7 +466,7 @@ csidacc$differid = csidacc$CSPaccuid - csidacc$CSMaccuid
 coneff = merge(cslocacc, csidacc, by = "ID")
 
 # Working directory - remember to set your own wd path
-setwd("C:/Users/pioli/Desktop/Preludium/data/Fear/SCR")
+setwd("C:/Users/pioli/OneDrive/Pulpit/PRELUDIUM/Preludium 2/data/Fear/SCR")
 
 # Load data - SCRs
 dfsscr = list.files(pattern = ".xlsx")
@@ -610,6 +609,191 @@ plot2 = dbscrplot %>% subset(!ID%in% outliersid) %>% ggplot(aes(differidrec, SCR
 
 grid.arrange(plot1, plot2, ncol = 2)
 
+
+```
+
+<a name="S1"></a>
+&nbsp;
+
+#####**6. Supplementary SDT analyses**
+
+```{r}
+
+# LOCALIZATION
+
+# Arbitrarily declare that up = "signal present", down = "signal absent"
+# "up - up" -> hit
+# "up - down" -> miss
+# "down - up" -> false alarm
+# "down - down" -> correct rejection
+
+dfall$resp[dfall$location == "up" & dfall$correctloc == 1] = 'hit' 
+dfall$resp[dfall$location == "up" & dfall$correctloc == 0] = 'miss' 
+dfall$resp[dfall$location == "down" & dfall$correctloc == 0] = 'fa' 
+dfall$resp[dfall$location == "down" & dfall$correctloc == 1] = 'cr' 
+
+dfall$r = as.factor(dfall$resp)
+dfall$conditioning = as.factor(dfall$conditioning)
+
+dfs <- data.frame(ID = character(0),
+                  hit_rate = numeric (0), #hit rate
+                  fa_rate = numeric(0), # false alarms rate
+                  s = numeric(0), # sensitivity (d')
+                  c = numeric(0), # criterion (c)
+                  hit_rate_CSP = numeric(0), # hit rate CS+
+                  hit_rate_CSM = numeric(0), # hit rate CS-
+                  fa_rate_CSP = numeric(0), # false alarm rate CS+
+                  fa_rate_CSM = numeric(0), # false alarm rate CS-
+                  s_CSP = numeric(0), # sensitivity CS+
+                  s_CSM = numeric(0), # sensitivity CS-
+                  c_CSP = numeric(0), # criterion CS+
+                  c_CSM = numeric(0)) # criterion CS- 
+
+
+for (p in setdiff(unique(dfall$ID), outliersloc)) {     # LOOP PARTICIPANTS (p)
+  #calculate general hit rate
+  hit_rate <- (length(dfall$r[dfall$r =="hit" & dfall$ID == p & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$location[dfall$ID == p & dfall$location == "up" & is.na(dfall$r) == FALSE])+1)
+  # calculate general false alarm rate
+  FA_rate <- (length(dfall$r[dfall$r =="fa" & dfall$ID == p & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$location[dfall$ID == p & dfall$location == "down" & is.na(dfall$r) == FALSE])+1)
+  
+  # calculate sensitivity (d') [d' = Z(hit_rate) - Z(False_alarms_rate)] 
+  s <- qnorm(hit_rate) - qnorm(FA_rate) 
+  
+  # calculate criterion (c) [c = - [Z(hit_rate) + Z(False_ alarms_rate)]/2] 
+  c <- -(qnorm(hit_rate)+qnorm(FA_rate))/2 
+  
+  # calculate hit rate - CS+
+  hit_rate_CSP <- (length(dfall$r[dfall$r =="hit" & dfall$ID == p & dfall$conditioning == "CS+" & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$location[dfall$ID == p & dfall$location == "up" & dfall$conditioning == "CS+" & is.na(dfall$r) == FALSE])+1)
+  
+  # calculate hit rate - CS-
+  hit_rate_CSM <- (length(dfall$r[dfall$r =="hit" & dfall$ID == p & dfall$conditioning == "CS-" & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$location[dfall$ID == p & dfall$location == "up" & dfall$conditioning == "CS-" & is.na(dfall$r) == FALSE])+1)
+  
+  # calculate false alarm rate - CS+
+  FA_rate_CSP <- (length(dfall$r[dfall$r =="fa" & dfall$ID == p & dfall$conditioning == "CS+" & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$location[dfall$ID == p & dfall$location == "down" & dfall$conditioning == "CS+" & is.na(dfall$r) == FALSE])+1)
+  
+  # calculate false alarm rate - CS-
+  FA_rate_CSM <- (length(dfall$r[dfall$r =="fa" & dfall$ID == p & dfall$conditioning == "CS-" & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$location[dfall$ID == p & dfall$location == "down" & dfall$conditioning == "CS-" & is.na(dfall$r) == FALSE])+1)
+  
+  # Sensitivity (d') [d' = Z(hit_rate) - Z(False_alarms_rate)] for CS+/CS-
+  s_CSP <- qnorm(hit_rate_CSP) - qnorm(FA_rate_CSP)
+  s_CSM <- qnorm(hit_rate_CSM) - qnorm(FA_rate_CSM) 
+  
+  # Criterion (c) [c = - [Z(hit_rate) + Z(False_ alarms_rate)]/2] for CS+/CS-
+  c_CSP <- -(qnorm(hit_rate_CSP)+qnorm(FA_rate_CSP))/2 
+  c_CSM <- -(qnorm(hit_rate_CSM)+qnorm(FA_rate_CSM))/2 
+  
+  # create a data frame with sensitivity and criterion measures
+  dfs[nrow(dfs)+1,] <- c(p, hit_rate, FA_rate, s, c, hit_rate_CSP, hit_rate_CSM, FA_rate_CSP, FA_rate_CSM, s_CSP, s_CSM, c_CSP, c_CSM)
+  
+} 
+
+# Compare sensitivities between CS+/CS- conditions
+dfs$s_CSP = as.numeric(dfs$s_CSP)
+dfs$s_CSM = as.numeric(dfs$s_CSM)
+t.test(dfs$s_CSP, dfs$s_CSM, paired = TRUE)
+
+# Compare bias between CS+/CS- conditions
+dfs$c_CSP = as.numeric(dfs$c_CSP)
+dfs$c_CSM = as.numeric(dfs$c_CSM)
+t.test(dfs$c_CSP, dfs$c_CSM, paired = TRUE)
+
+# Means
+mean(dfs$s_CSP)
+mean(dfs$s_CSM)
+mean(dfs$c_CSP)
+mean(dfs$c_CSM)
+
+# Test whether bias exists towards any of the alternatives
+t.test(dfs$c_CSP, mu = 0)
+t.test(dfs$c_CSM, mu = 0)
+
+# DISCRIMINATION
+
+# Arbitrarily declare that left = "signal present", right = "signal absent"
+# "left - left" -> hit
+# "left - right" -> miss
+# "right - left" -> false alarm
+# "right - right" -> correct rejection
+
+dfall$resp[dfall$orientation == "left" & dfall$correctid == 1] = 'hit' 
+dfall$resp[dfall$orientation == "left" & dfall$correctid == 0] = 'miss' 
+dfall$resp[dfall$orientation == "right" & dfall$correctid == 0] = 'fa' 
+dfall$resp[dfall$orientation == "right" & dfall$correctid == 1] = 'cr' 
+
+dfall$r = as.factor(dfall$resp)
+dfall$conditioning = as.factor(dfall$conditioning)
+
+dfs <- data.frame(ID = character(0),
+                  hit_rate = numeric (0), #hit rate
+                  fa_rate = numeric(0), # false alarms rate
+                  s = numeric(0), # sensitivity (d')
+                  c = numeric(0), # criterion (c)
+                  hit_rate_CSP = numeric(0), # hit rate CS+
+                  hit_rate_CSM = numeric(0), # hit rate CS-
+                  fa_rate_CSP = numeric(0), # false alarm rate CS+
+                  fa_rate_CSM = numeric(0), # false alarm rate CS-
+                  s_CSP = numeric(0), # sensitivity CS+
+                  s_CSM = numeric(0), # sensitivity CS-
+                  c_CSP = numeric(0), # criterion CS+
+                  c_CSM = numeric(0)) # criterion CS- 
+
+
+for (p in setdiff(unique(dfall$ID), outliersid)) {     # LOOP PARTICIPANTS (p)
+  #calculate general hit rate
+  hit_rate <- (length(dfall$r[dfall$r =="hit" & dfall$ID == p & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$orientation[dfall$ID == p & dfall$orientation == "left" & is.na(dfall$r) == FALSE])+1)
+  # calculate general false alarm rate
+  FA_rate <- (length(dfall$r[dfall$r =="fa" & dfall$ID == p & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$orientation[dfall$ID == p & dfall$orientation == "right" & is.na(dfall$r) == FALSE])+1)
+  
+  # calculate sensitivity (d') [d' = Z(hit_rate) - Z(False_alarms_rate)] 
+  s <- qnorm(hit_rate) - qnorm(FA_rate) 
+  
+  # calculate criterion (c) [c = - [Z(hit_rate) + Z(False_ alarms_rate)]/2] 
+  c <- -(qnorm(hit_rate)+qnorm(FA_rate))/2 
+  
+  # calculate hit rate - CS+
+  hit_rate_CSP <- (length(dfall$r[dfall$r =="hit" & dfall$ID == p & dfall$conditioning == "CS+" & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$orientation[dfall$ID == p & dfall$orientation == "left" & dfall$conditioning == "CS+" & is.na(dfall$r) == FALSE])+1)
+  
+  # calculate hit rate - CS-
+  hit_rate_CSM <- (length(dfall$r[dfall$r =="hit" & dfall$ID == p & dfall$conditioning == "CS-" & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$orientation[dfall$ID == p & dfall$orientation == "left" & dfall$conditioning == "CS-" & is.na(dfall$r) == FALSE])+1)
+  
+  # calculate false alarm rate - CS+
+  FA_rate_CSP <- (length(dfall$r[dfall$r =="fa" & dfall$ID == p & dfall$conditioning == "CS+" & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$orientation[dfall$ID == p & dfall$orientation == "right" & dfall$conditioning == "CS+" & is.na(dfall$r) == FALSE])+1)
+  
+  # calculate false alarm rate - CS-
+  FA_rate_CSM <- (length(dfall$r[dfall$r =="fa" & dfall$ID == p & dfall$conditioning == "CS-" & is.na(dfall$r) == FALSE])+0.5)/(length(dfall$orientation[dfall$ID == p & dfall$orientation == "right" & dfall$conditioning == "CS-" & is.na(dfall$r) == FALSE])+1)
+  
+  # Sensitivity (d') [d' = Z(hit_rate) - Z(False_alarms_rate)] for CS+/CS-
+  s_CSP <- qnorm(hit_rate_CSP) - qnorm(FA_rate_CSP)
+  s_CSM <- qnorm(hit_rate_CSM) - qnorm(FA_rate_CSM) 
+  
+  # Criterion (c) [c = - [Z(hit_rate) + Z(False_ alarms_rate)]/2] for CS+/CS-
+  c_CSP <- -(qnorm(hit_rate_CSP)+qnorm(FA_rate_CSP))/2 
+  c_CSM <- -(qnorm(hit_rate_CSM)+qnorm(FA_rate_CSM))/2 
+  
+  # create a data frame with sensitivity and criterion measures
+  dfs[nrow(dfs)+1,] <- c(p, hit_rate, FA_rate, s, c, hit_rate_CSP, hit_rate_CSM, FA_rate_CSP, FA_rate_CSM, s_CSP, s_CSM, c_CSP, c_CSM)
+  
+} 
+
+# Compare sensitivities between CS+/CS- conditions
+dfs$s_CSP = as.numeric(dfs$s_CSP)
+dfs$s_CSM = as.numeric(dfs$s_CSM)
+t.test(dfs$s_CSP, dfs$s_CSM, paired = TRUE)
+
+# Compare bias between CS+/CS- conditions
+dfs$c_CSP = as.numeric(dfs$c_CSP)
+dfs$c_CSM = as.numeric(dfs$c_CSM)
+t.test(dfs$c_CSP, dfs$c_CSM, paired = TRUE)
+
+# Means
+mean(dfs$s_CSP)
+mean(dfs$s_CSM)
+mean(dfs$c_CSP)
+mean(dfs$c_CSM)
+
+# Test whether bias exists towards any of the alternatives
+t.test(dfs$c_CSP, mu = 0)
+t.test(dfs$c_CSM, mu = 0)
 
 ```
 
